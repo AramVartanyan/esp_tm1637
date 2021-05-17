@@ -1,0 +1,23 @@
+menu "TM1637 Configuration"
+
+    config TM1637_CLK_PIN
+        int "CLK pin GPIO number"
+        range 0 34
+        default 18
+        help
+            GPIO number for CLOCK pin of TM1637 display.
+            For ESP8266, GPIO 5 is a good choice.
+            Some GPIOs are used for other purposes and cannot be used.
+            GPIOs 35-39 are input-only so cannot be used as outputs.
+
+    config TM1637_DIO_PIN
+        int "DIO pin GPIO number"
+        range 0 34
+        default 19
+        help
+            GPIO number for DATA IO pin of TM1637 display.
+            For ESP8266, GPIO 4 is a good choice.
+            Some GPIOs are used for other purposes and cannot be used.
+            GPIOs 35-39 are input-only so cannot be used as outputs.
+
+endmenu
