@@ -20,7 +20,7 @@
 
 void tm1637_task(void * arg)
 {
-    uint8_t n_digits = 6;
+    uint8_t n_digits = 4;
 	tm1637_led_t * display = tm1637_init(LED_CLK, LED_DTA, n_digits);
 
 	while (true)
@@ -39,24 +39,17 @@ void tm1637_task(void * arg)
         tm1637_print_string(display, "Auto");
         vTaskDelay(1000 / portTICK_RATE_MS);
         
+        
         //Test stmbols
-        uint8_t display_text[6] = {0x38, 0x79, 0x78, 0x6D};
-        tm1637_print_symbols(display, display_text);
+        tm1637_print_4_symbols(display, 0x7A, 0x79, 0x79, 0x73);
         vTaskDelay(1000 / portTICK_RATE_MS);
-        display_text [0] = 0x3D;
-        display_text [1] = 0x79;
-        display_text [2] = 0x78;
-        display_text [3] = 0x00;
-        tm1637_print_symbols(display, display_text);
+        tm1637_print_4_symbols(display, 0x39, 0x77, 0x38, 0x55);
         vTaskDelay(1000 / portTICK_RATE_MS);
+        
         if (n_digits == 6) {
-            display_text [0] = 0x08;
-            display_text [1] = 0x58;
-            display_text [2] = 0x5C;
-            display_text [3] = 0x5C;
-            display_text [4] = 0x18;
-            display_text [5] = 0x08;
-            tm1637_print_symbols(display, display_text);
+            tm1637_print_6_symbols(display, 0x00, 0x3D, 0x79, 0x78, 0x00, 0x00);
+            vTaskDelay(1000 / portTICK_RATE_MS);
+            tm1637_print_6_symbols(display, 0x08, 0x58, 0x5C, 0x5C, 0x18, 0x08);
             vTaskDelay(2000 / portTICK_RATE_MS);
         }
 
@@ -123,7 +116,7 @@ void tm1637_task(void * arg)
                 vTaskDelay(300 / portTICK_RATE_MS);
             }
         }
-             
+
         tm1637_clear(display);
         vTaskDelay(1000 / portTICK_RATE_MS);
 	}
@@ -133,4 +126,3 @@ void app_main()
 {
 	xTaskCreate(&tm1637_task, "tm1637_task", 4096, NULL, 5, NULL);
 }
-
