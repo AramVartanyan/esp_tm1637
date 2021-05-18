@@ -26,7 +26,6 @@
 #define esp_tm1637_h
 
 #include <stdio.h>
-#include <stdarg.h>
 
 typedef struct {
     uint8_t tm_clk;
