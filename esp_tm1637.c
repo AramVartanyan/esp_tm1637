@@ -9,13 +9,16 @@
 
 #include "esp_tm1637.h"
 
-#include "stdlib.h"
+#include "stdio.h"
 #include "stdarg.h"
+#include "stdlib.h"
 #include "stdbool.h"
 #include "string.h"
 #include "math.h"
 #include "driver/gpio.h"
 #include "esp32/rom/ets_sys.h"
+//#include "esp_log.h"
+//static const char *TAG = "TM1637 library";
 
 #define TM1637_COMM1 0x40  //CmdSetData       0b01000000
 #define TM1637_COMM2 0xC0  //CmdSetAddress    0b11000000
@@ -361,19 +364,59 @@ void tm1637_print_string(tm1637_led_t * led, const char string_data[]) {
     tm_stop(led);
 }
 
-void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data) {
-    
+/*
+ void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data) {
+ 
+ tm_start(led);
+ tm_send_byte(led, TM1637_COMM1);
+ tm_stop(led);
+ 
+ for (uint8_t i = 0; i < led->tm_digits; ++i) {
+     tm_start(led);
+     tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
+     tm_send_byte(led, seg_data[i]);
+     tm_stop(led);
+ }
+ 
+ tm_start(led);
+ tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
+ tm_stop(led);
+}
+ */
+
+void tm1637_print_4_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
+
+    uint8_t seg_data[] = {d1, d2, d3, d4};
     tm_start(led);
     tm_send_byte(led, TM1637_COMM1);
     tm_stop(led);
-    
+
     for (uint8_t i = 0; i < led->tm_digits; ++i) {
         tm_start(led);
         tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
         tm_send_byte(led, seg_data[i]);
         tm_stop(led);
     }
-    
+
+    tm_start(led);
+    tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
+    tm_stop(led);
+}
+
+void tm1637_print_6_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4, uint8_t d5, uint8_t d6) {
+
+    uint8_t seg_data[] = {d1, d2, d3, d4, d5, d6};
+    tm_start(led);
+    tm_send_byte(led, TM1637_COMM1);
+    tm_stop(led);
+
+    for (uint8_t i = 0; i < led->tm_digits; ++i) {
+        tm_start(led);
+        tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
+        tm_send_byte(led, seg_data[i]);
+        tm_stop(led);
+    }
+
     tm_start(led);
     tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
     tm_stop(led);
@@ -515,21 +558,16 @@ void tm1637_print_float(tm1637_led_t * led, float f_value) {
 
 void tm1637_test_segments(tm1637_led_t * led) {
     if (led->tm_digits == 6) {
-        uint8_t display_text[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        tm1637_print_symbols(led, display_text);
+        tm1637_print_6_symbols(led, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
     } else {
-        uint8_t display_text[] = {0xFF, 0xFF, 0xFF, 0xFF};
-        tm1637_print_symbols(led, display_text);
+        tm1637_print_4_symbols(led, 0xFF, 0xFF, 0xFF, 0xFF);
     }
 }
 
 void tm1637_clear(tm1637_led_t * led) {
     if (led->tm_digits == 6) {
-        uint8_t display_text[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        tm1637_print_symbols(led, display_text);
+        tm1637_print_6_symbols(led, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
     } else {
-        uint8_t display_text[] = {0x00, 0x00, 0x00, 0x00};
-        tm1637_print_symbols(led, display_text);
+        tm1637_print_4_symbols(led, 0x00, 0x00, 0x00, 0x00);
     }
 }
-
