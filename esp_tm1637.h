@@ -17,8 +17,6 @@
  *  E     C
  *    DDD
  *
- * XGFEDCBA, DATA
- *
  */
 
 
@@ -26,6 +24,7 @@
 #define esp_tm1637_h
 
 #include <stdio.h>
+#include <stdarg.h>
 
 typedef struct {
     uint8_t tm_clk;
@@ -33,10 +32,6 @@ typedef struct {
     uint8_t tm_bright;
     uint8_t tm_digits;
 } tm1637_led_t;
-
-//m_pin_clk -> tm_clk
-//m_pin_dta -> tm_dio
-//m_brightness -> tm_bright
 
 /*
  * @brief Constructs new LED TM1637 object
@@ -65,7 +60,7 @@ void tm1637_set_segment_raw(tm1637_led_t * led, const uint8_t segment_idx, const
 /*
  * @brief Print temperature in format 23.2º or -9.9º (23.2ºC or -13.8ºC for 6 digits displays)
  * @param led LED object
- * @param t - temperature in integer format multiplied by 10
+ * @param t temperature in integer format multiplied by 10
  * in order to easily do calculation without loosing the decimals.
  * The possible range is between -999 and 999 (±99ºC)
  */
@@ -90,9 +85,18 @@ void tm1637_print_string(tm1637_led_t * led, const char string_data[]);
 /*
  * @brief Print symbols based on its byte hexadecimal code
  * @param led LED object
- * @param seg_data array - HEX code of the 7-segment symbols (size up to 4 or 6 elements)
+ * @param d1, d2 ... - HEX code of the 7-segment symbols (size up to 4 elements)
  */
-void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data);
+void tm1637_print_4_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4);
+
+//void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data);
+
+/*
+ * @brief Print symbols based on its byte hexadecimal code
+ * @param led LED object
+ * @param d1, d2 ... - HEX code of the 7-segment symbols (size up to 6 elements)
+ */
+void tm1637_print_6_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4, uint8_t d5, uint8_t d6);
 
 /*
  * @brief Lights up all segments for test purpose or initialisation
