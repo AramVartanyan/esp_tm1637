@@ -4,7 +4,7 @@
  *
  *  Created by Aram Vartanyan on 6.05.21.
  *  based on https://github.com/petrows/esp-32-tm1637
- *  and on https://github.com/jasonacox
+ *  and on https://github.com/jasonacox/TM1637TinyDisplay
  */
 
 #include "esp_tm1637.h"
