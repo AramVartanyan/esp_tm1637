@@ -3,9 +3,11 @@
  *
  *
  *  Created by Aram Vartanyan on 6.05.21.
- *  based on https://github.com/petrows/esp-32-tm1637
- *  and on https://github.com/jasonacox/TM1637TinyDisplay
- *
+ *  based on:
+ *  https://www.mcielectronics.cl/website_MCI/static/documents/Datasheet_TM1637.pdf
+ *  https://github.com/petrows/esp-32-tm1637
+ *  https://github.com/jasonacox/TM1637TinyDisplay
+ *  https://github.com/avishorp/TM1637
  *
  *7 segment HEX map
  *
@@ -26,6 +28,7 @@
 #define esp_tm1637_h
 
 #include <stdio.h>
+#include <stdarg.h>
 
 typedef struct {
     uint8_t tm_clk;
@@ -89,8 +92,6 @@ void tm1637_print_string(tm1637_led_t * led, const char string_data[]);
  * @param d1, d2 ... - HEX code of the 7-segment symbols (size up to 4 elements)
  */
 void tm1637_print_4_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4);
-
-//void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data);
 
 /*
  * @brief Print symbols based on its byte hexadecimal code
