@@ -3,27 +3,43 @@
  *
  *
  *  Created by Aram Vartanyan on 6.05.21.
- *  based on https://github.com/petrows/esp-32-tm1637
- *  and on https://github.com/jasonacox/TM1637TinyDisplay
+ *  based on:
+ *  https://www.mcielectronics.cl/website_MCI/static/documents/Datasheet_TM1637.pdf
+ *  https://github.com/petrows/esp-32-tm1637
+ *  https://github.com/jasonacox/TM1637TinyDisplay
+ *  https://github.com/avishorp/TM1637
+ *
  */
 
 #include "esp_tm1637.h"
 
 #include "stdio.h"
+#include "stdarg.h"
 #include "stdlib.h"
 #include "stdbool.h"
 #include "string.h"
 #include "math.h"
 #include "driver/gpio.h"
 #include "esp32/rom/ets_sys.h"
-//#include "esp_log.h"
-//static const char *TAG = "TM1637 library";
 
 #define TM1637_COMM1 0x40  //CmdSetData       0b01000000
 #define TM1637_COMM2 0xC0  //CmdSetAddress    0b11000000
 #define TM1637_COMM3 0x44  //CmdFixedAddress  0b01000100
 #define TM1637_COMM4 0x80  //CmdDisplay       0b10000000
 #define TM1637_LBRTN 0x88  //lower brightness 0b10001000
+
+#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
+
+#define TM_INPUT  GPIO_MODE_INPUT
+#define TM_OUTPUT GPIO_MODE_OUTPUT
+
+#else
+//esp-open-rtos
+
+#define TM_INPUT  GPIO_INPUT
+#define TM_OUTPUT GPIO_OUTPUT
+
+#endif
 
 //Two possible operative mode (command 0x40 or 0x44):
 //0x40 - with increasing car destination address: each data will be written progressively in successive addresses starting from the selected one
@@ -129,7 +145,7 @@ static const uint8_t tm_ascii[] = {
     0x71, // 102 f
     0x3D, // 103 g
     0x74, // 104 h
-    0x20, // 105 i
+    0x10, // 105 i
     0x1E, // 106 j
     0x7A, // 107 k
     0x18, // 108 l
@@ -159,6 +175,8 @@ static void tm_stop(tm1637_led_t * led);
 static void tm_send_byte(tm1637_led_t * led, uint8_t byte);
 static void tm_delay();
 static void output_level(uint8_t gpio, uint8_t lvl);
+static void output_direction(uint8_t gpio, uint8_t direction);
+static uint8_t input_level(uint8_t gpio);
 static uint8_t tm1637_digitmap(uint8_t tm_digits, uint8_t digit);
 
 static void tm_delay() {
@@ -178,6 +196,31 @@ static void output_level(uint8_t gpio, uint8_t lvl) {
 #else
     //esp-open-rtos
     gpio_write(gpio, lvl);
+#endif
+}
+
+static uint8_t input_level(uint8_t gpio) {
+    
+    uint8_t read_level;
+#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
+    read_level = gpio_get_level(gpio);
+#else
+    //esp-open-rtos
+    read_level = gpio_read(gpio);
+#endif
+    return read_level;
+}
+
+static void output_direction(uint8_t gpio, uint8_t direction) {
+    
+#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
+
+    gpio_set_direction(gpio, direction);
+
+#else
+//esp-open-rtos
+    gpio_enable(gpio, direction);
+    
 #endif
 }
 
@@ -216,31 +259,17 @@ static void tm_send_byte(tm1637_led_t * led, uint8_t byte) {
     
     output_level(led->tm_clk, 0); // TM1637 starts ACK (pulls DIO low)
     tm_delay();
-   
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
 
-    gpio_set_direction(led->tm_dio, GPIO_MODE_INPUT);
-    uint8_t ack = gpio_get_level(led->tm_dio);
-    while (ack);
-    gpio_set_level(led->tm_clk, 1);
+    output_direction(led->tm_dio, TM_INPUT);
+    uint8_t ack = input_level(led->tm_dio);
+    while (ack) {
+        ack = input_level(led->tm_dio);
+    }
+    output_level(led->tm_clk, 1);
     tm_delay();
-    gpio_set_level(led->tm_clk, 0); // TM1637 ends ACK (releasing DIO)
+    output_level(led->tm_clk, 0); // TM1637 ends ACK (releasing DIO)
     tm_delay();
-    gpio_set_direction(led->tm_dio, GPIO_MODE_OUTPUT);
-
-#else
-//esp-open-rtos
-    gpio_enable(led->tm_dio, GPIO_INPUT);
-    uint8_t ack = gpio_read(led->tm_dio);
-    while (ack);
-    gpio_write(led->tm_clk, 1);
-    tm_delay();
-    gpio_write(led->tm_clk, 0);
-    tm_delay();
-    gpio_enable(led->tm_dio, GPIO_OUTPUT);
-
-#endif
- 
+    output_direction(led->tm_dio, TM_OUTPUT);
 }
 
 static uint8_t tm1637_digitmap(uint8_t tm_digits, uint8_t digit) {
@@ -362,26 +391,6 @@ void tm1637_print_string(tm1637_led_t * led, const char string_data[]) {
     tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
     tm_stop(led);
 }
-
-/*
- void tm1637_print_symbols(tm1637_led_t * led, uint8_t *seg_data) {
- 
- tm_start(led);
- tm_send_byte(led, TM1637_COMM1);
- tm_stop(led);
- 
- for (uint8_t i = 0; i < led->tm_digits; ++i) {
-     tm_start(led);
-     tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
-     tm_send_byte(led, seg_data[i]);
-     tm_stop(led);
- }
- 
- tm_start(led);
- tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
- tm_stop(led);
-}
- */
 
 void tm1637_print_4_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
 
