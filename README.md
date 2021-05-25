@@ -1,11 +1,11 @@
 # ESP TM1637 #
 
 ESP32 esp-idf Library for 7-segment LED Display modules with TM1637 chip on board
-Not yet tested, but it should work with ESP8266_RTOS_SDK and also under esp-open-rtos as well.
 
 ## Description
 
 This library supports 4-digits and 6-digits modules with decimal points.
+Not yet tested, but it should work with ESP8266_RTOS_SDK and under esp-open-rtos as well.
 
 ![TM1637](pictures/4-digits.jpg)
 
