@@ -14,13 +14,22 @@
 #include "esp_tm1637.h"
 
 #include "stdio.h"
-#include "stdarg.h"
 #include "stdlib.h"
 #include "stdbool.h"
 #include "string.h"
 #include "math.h"
 #include "driver/gpio.h"
+
+#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
+
 #include "esp32/rom/ets_sys.h"
+
+#else
+//esp-open-rtos
+
+#include "espressif/esp_misc.h"
+
+#endif
 
 #define TM1637_COMM1 0x40  //CmdSetData       0b01000000
 #define TM1637_COMM2 0xC0  //CmdSetAddress    0b11000000
