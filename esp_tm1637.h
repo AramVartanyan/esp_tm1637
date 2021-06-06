@@ -41,7 +41,7 @@ typedef struct {
  * @brief Constructs new LED TM1637 object
  * @param pin_clk - GPIO pin for CLK input of LED module
  * @param pin_data - GPIO pin for DIO input of LED module
- * @param n_digits - Number of digit positions 4 or 6 - Not implemented yet
+ * @param n_digits - Number of digit positions 4 or 6
  * @return
  */
 tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits);
