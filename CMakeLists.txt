@@ -1,10 +1,12 @@
-set(COMPONENT_ADD_INCLUDEDIRS .)
-
-# Edit following two lines to set component requirements (see docs)
-set(COMPONENT_REQUIRES )
-set(COMPONENT_PRIV_REQUIRES )
-
-set(COMPONENT_SRCS ./esp_tm1637.c)
-
-register_component()
-target_compile_options(${COMPONENT_LIB} PRIVATE -DESP_IDF)
+# ESP-IDF (all ESP32 chips, 4.x / 5.x) and ESP8266_RTOS_SDK.
+# IDF_TARGET is a build property: read it with idf_build_get_property.
+idf_build_get_property(_tm_target IDF_TARGET)
+if(_tm_target STREQUAL "esp8266")
+    idf_component_register(SRCS "esp_tm1637.c"
+                        INCLUDE_DIRS "."
+                        REQUIRES esp8266 freertos)
+else()
+    idf_component_register(SRCS "esp_tm1637.c"
+                        INCLUDE_DIRS "."
+                        REQUIRES driver esp_rom freertos)
+endif()

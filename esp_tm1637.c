@@ -18,17 +18,50 @@
 #include "stdbool.h"
 #include "string.h"
 #include "math.h"
+
+/* ------------------------------------------------------------- platform */
+
+#ifdef ESP_PLATFORM
+/* ESP-IDF (all ESP32 chips) and ESP8266_RTOS_SDK: both define ESP_PLATFORM */
+#include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/gpio.h"
 
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-
+#if CONFIG_IDF_TARGET_ESP8266
+#include "rom/ets_sys.h"
+#define TM_DELAY_US(us) ets_delay_us(us)
+#define TM_OPEN_DRAIN   0               /* direction switching, as before */
+#else
+#include "esp_idf_version.h"
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
+#include "esp_rom_sys.h"
+#define TM_DELAY_US(us) esp_rom_delay_us(us)
+#else
 #include "esp32/rom/ets_sys.h"
+#define TM_DELAY_US(us) ets_delay_us(us)
+#endif
+#define TM_OPEN_DRAIN   1               /* GPIO_MODE_INPUT_OUTPUT_OD */
+#endif
 
 #else
-//esp-open-rtos
-
+/* esp-open-rtos */
+#include "FreeRTOS.h"
+#include "task.h"
+#include "esp/gpio.h"
 #include "espressif/esp_misc.h"
+#define TM_DELAY_US(us) sdk_os_delay_us(us)
+#define TM_OPEN_DRAIN   0
+#endif
 
+#ifndef CONFIG_TM1637_BIT_DELAY_US
+#define CONFIG_TM1637_BIT_DELAY_US  3
+#endif
+#ifndef CONFIG_TM1637_ACK_TIMEOUT_US
+#define CONFIG_TM1637_ACK_TIMEOUT_US 100
+#endif
+#ifndef CONFIG_TM1637_RETRY_MS
+#define CONFIG_TM1637_RETRY_MS      5000
 #endif
 
 #define TM1637_COMM1 0x40  //CmdSetData       0b01000000
@@ -37,28 +70,16 @@
 #define TM1637_COMM4 0x80  //CmdDisplay       0b10000000
 #define TM1637_LBRTN 0x88  //lower brightness 0b10001000
 
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-
-#define TM_INPUT  GPIO_MODE_INPUT
-#define TM_OUTPUT GPIO_MODE_OUTPUT
-
-#else
-//esp-open-rtos
-
-#define TM_INPUT  GPIO_INPUT
-#define TM_OUTPUT GPIO_OUTPUT
-
-#endif
-
 //Two possible operative mode (command 0x40 or 0x44):
 //0x40 - with increasing car destination address: each data will be written progressively in successive addresses starting from the selected one
 //0x44 - normal operation mode. Fixed destination address: data are sent to the selected address only (also write command setting)
 //0xC0 - address command setting
 //0x80 - display and control command setting
 
-#define DELAY_US 3 // safety is 5 us
-
-#define TM_DEG 0x63
+#define TM_MINUS 0x40
+#define TM_DP    0x80
+#define TM_DEG   0x63
+#define TM_C     0x39
 
 static const uint8_t tm_num[] = {
     // XGFEDCBA
@@ -179,182 +200,210 @@ static const uint8_t tm_ascii[] = {
     0x00  // 127 
 };
 
-static void tm_start(tm1637_led_t * led);
-static void tm_stop(tm1637_led_t * led);
-static void tm_send_byte(tm1637_led_t * led, uint8_t byte);
-static void tm_delay();
-static void output_level(uint8_t gpio, uint8_t lvl);
-static void output_direction(uint8_t gpio, uint8_t direction);
-static uint8_t input_level(uint8_t gpio);
-static uint8_t tm1637_digitmap(uint8_t tm_digits, uint8_t digit);
 
-static void tm_delay() {
+/* ------------------------------------------------------------- line level */
 
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-    ets_delay_us(DELAY_US);
-#else
-    //esp-open-rtos
-    sdk_os_delay_us(DELAY_US);
-#endif
+static void tm_delay(const tm1637_led_t * led) {
+    TM_DELAY_US(led->tm_delay_us);
 }
 
-static void output_level(uint8_t gpio, uint8_t lvl) {
-
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-    gpio_set_level(gpio, lvl);
+static void pin_level(uint8_t gpio, uint8_t lvl) {
+#ifdef ESP_PLATFORM
+    gpio_set_level((gpio_num_t)gpio, lvl);
 #else
-    //esp-open-rtos
     gpio_write(gpio, lvl);
 #endif
 }
 
-static uint8_t input_level(uint8_t gpio) {
-    
-    uint8_t read_level;
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-    read_level = gpio_get_level(gpio);
+static uint8_t pin_read(uint8_t gpio) {
+#ifdef ESP_PLATFORM
+    return gpio_get_level((gpio_num_t)gpio);
 #else
-    //esp-open-rtos
-    read_level = gpio_read(gpio);
-#endif
-    return read_level;
-}
-
-static void output_direction(uint8_t gpio, uint8_t direction) {
-    
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-
-    gpio_set_direction(gpio, direction);
-
-#else
-//esp-open-rtos
-    gpio_enable(gpio, direction);
-    
+    return gpio_read(gpio);
 #endif
 }
 
-static void tm_start(tm1637_led_t * led) {
+#if !TM_OPEN_DRAIN
+static void pin_dir(uint8_t gpio, bool output) {
+#ifdef ESP_PLATFORM
+    gpio_set_direction((gpio_num_t)gpio, output ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT);
+#else
+    gpio_enable(gpio, output ? GPIO_OUTPUT : GPIO_INPUT);
+#endif
+}
+#endif
+
+/* Open-drain: level 1 releases the line and the pull-up resistor makes it high,
+ * so the TM1637 can pull DIO low (ACK) without fighting the MCU output. */
+static void tm_clk(const tm1637_led_t * led, uint8_t lvl) { pin_level(led->tm_clk, lvl); }
+static void tm_dio(const tm1637_led_t * led, uint8_t lvl) { pin_level(led->tm_dio, lvl); }
+
+static uint32_t tm_now_tick(void) {
+    return (uint32_t)xTaskGetTickCount();
+}
+
+/* ------------------------------------------------------------- protocol */
+
+static void tm_start(const tm1637_led_t * led) {
     // Send start signal
     // Both outputs are expected to be HIGH beforehand
-    output_level(led->tm_dio, 0);
-    tm_delay();
+    tm_dio(led, 0);
+    tm_delay(led);
 }
 
-static void tm_stop(tm1637_led_t * led) {
+static void tm_stop(const tm1637_led_t * led) {
     // Send stop signal
     // CLK is expected to be LOW beforehand
-    output_level(led->tm_dio, 0);
-    tm_delay();
-    output_level(led->tm_clk, 1);
-    tm_delay();
-    output_level(led->tm_dio, 1);
-    tm_delay();
+    tm_dio(led, 0);
+    tm_delay(led);
+    tm_clk(led, 1);
+    tm_delay(led);
+    tm_dio(led, 1);
+    tm_delay(led);
 }
 
-static void tm_send_byte(tm1637_led_t * led, uint8_t byte) {
-    for (uint8_t i=0; i<8; ++i) {
-        output_level(led->tm_clk, 0);
-        tm_delay();
-        output_level(led->tm_dio, byte & 0x01); // Send current bit
+/* Returns false when the TM1637 does not acknowledge the byte (missing/broken display). */
+static bool tm_send_byte(const tm1637_led_t * led, uint8_t byte) {
+    for (uint8_t i = 0; i < 8; ++i) {
+        tm_clk(led, 0);
+        tm_delay(led);
+        tm_dio(led, byte & 0x01); // Send current bit, LSB first
         byte >>= 1;
-        tm_delay();
-        output_level(led->tm_clk, 1);
-        tm_delay();
+        tm_delay(led);
+        tm_clk(led, 1);
+        tm_delay(led);
     }
-    
-    /*
-     The TM1637 signals an ACK by pulling DIO low from the falling edge of CLK after sending the 8th bit, to the next falling edge of CLK. DIO needs to be set as input during this time to avoid having both chips trying to drive DIO at the same time.
-     */
-    
-    output_level(led->tm_clk, 0); // TM1637 starts ACK (pulls DIO low)
-    tm_delay();
 
-    output_direction(led->tm_dio, TM_INPUT);
-    uint8_t ack = input_level(led->tm_dio);
-    while (ack) {
-        ack = input_level(led->tm_dio);
+    /*
+     The TM1637 signals an ACK by pulling DIO low from the falling edge of CLK after sending
+     the 8th bit, to the next falling edge of CLK. DIO is released (open-drain) or set as input
+     during this time to avoid having both chips trying to drive DIO at the same time.
+     */
+    tm_clk(led, 0); // TM1637 starts ACK (pulls DIO low)
+#if TM_OPEN_DRAIN
+    tm_dio(led, 1);
+#else
+    pin_dir(led->tm_dio, false);
+#endif
+    tm_delay(led);
+
+    bool ack = false;
+    for (uint32_t t = 0; t <= CONFIG_TM1637_ACK_TIMEOUT_US; ++t) {
+        if (pin_read(led->tm_dio) == 0) {
+            ack = true;
+            break;
+        }
+        TM_DELAY_US(1);
     }
-    output_level(led->tm_clk, 1);
-    tm_delay();
-    output_level(led->tm_clk, 0); // TM1637 ends ACK (releasing DIO)
-    tm_delay();
-    output_direction(led->tm_dio, TM_OUTPUT);
+
+    tm_clk(led, 1);
+    tm_delay(led);
+    tm_clk(led, 0); // TM1637 ends ACK (releasing DIO)
+    tm_delay(led);
+#if !TM_OPEN_DRAIN
+    pin_dir(led->tm_dio, true);
+#endif
+    return ack;
 }
 
 static uint8_t tm1637_digitmap(uint8_t tm_digits, uint8_t digit) {
     if (tm_digits == 6) {
-        switch (digit) {
-            case 0:
-                digit = 2;
-                break;
-            case 1:
-                digit = 1;
-                break;
-            case 2:
-                digit = 0;
-                break;
-            case 3:
-                digit = 5;
-                break;
-            case 4:
-                digit = 4;
-                break;
-            case 5:
-                digit = 3;
-                break;
-                
-            default:
-                break;
-        }
+        /* usual wiring of the 6-digit modules */
+        static const uint8_t map6[6] = { 2, 1, 0, 5, 4, 3 };
+        return map6[digit];
     }
     return digit;
 }
 
+/* Writes `count` digits starting at `first` (fixed address mode), then the display control.
+ * An offline display is skipped until the retry time; a missing ACK marks it offline. */
+static void tm_write(tm1637_led_t * led, uint8_t first, const uint8_t *data, uint8_t count) {
+    if (!led) {
+        return;
+    }
+    if (!led->tm_online && (int32_t)(tm_now_tick() - led->tm_retry_tick) < 0) {
+        return;
+    }
+    bool ok;
+    tm_start(led);
+    ok = tm_send_byte(led, TM1637_COMM3);
+    tm_stop(led);
+    for (uint8_t i = 0; ok && i < count && first + i < led->tm_digits; ++i) {
+        tm_start(led);
+        ok = tm_send_byte(led, tm1637_digitmap(led->tm_digits, first + i) | TM1637_COMM2) &&
+             tm_send_byte(led, data[i]);
+        tm_stop(led);
+    }
+    if (ok) {
+        tm_start(led);
+        ok = tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
+        tm_stop(led);
+    }
+    led->tm_online = ok;
+    if (!ok) {
+        led->tm_retry_tick = tm_now_tick() + pdMS_TO_TICKS(CONFIG_TM1637_RETRY_MS);
+    }
+}
+
+/* ------------------------------------------------------------- API */
+
 tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
-    tm1637_led_t * led = (tm1637_led_t *) malloc(sizeof(tm1637_led_t));
+    tm1637_led_t * led = (tm1637_led_t *) calloc(1, sizeof(tm1637_led_t));
+    if (!led) {
+        return NULL;
+    }
     led->tm_clk = pin_clk;
     led->tm_dio = pin_dio;
     led->tm_bright = 0x07;
-    
-    //old statement n_digits > 0 || n_digits < 7
-    if (n_digits > 4) {
-      led->tm_digits = 6;
-    } else {
-      led->tm_digits = 4;
-    }
-    
-#if defined CONFIG_IDF_TARGET_ESP8266 || defined CONFIG_IDF_TARGET_ESP32
-    gpio_config_t io_conf = {0};
-    
-    io_conf.pin_bit_mask = (1ULL<<pin_clk);
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    gpio_config(&io_conf);
-    
-    io_conf.pin_bit_mask = (1ULL<<pin_dio);
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    gpio_config(&io_conf);
+    led->tm_delay_us = CONFIG_TM1637_BIT_DELAY_US;
+    led->tm_online = true;
 
+    if (n_digits < 1) {
+        n_digits = 1;
+    } else if (n_digits > TM1637_MAX_DIGITS) {
+        n_digits = TM1637_MAX_DIGITS;
+    }
+    led->tm_digits = n_digits;
+
+#ifdef ESP_PLATFORM
+    gpio_config_t io_conf = {0};            /* interrupts disabled */
+    io_conf.pin_bit_mask = (1ULL << pin_clk) | (1ULL << pin_dio);
+#if TM_OPEN_DRAIN
+    io_conf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
 #else
-//esp-open-rtos
+    io_conf.mode = GPIO_MODE_OUTPUT;
+#endif
+    /* the internal pull-up only helps the external resistors (weak, ~45 kOhm) */
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gpio_config(&io_conf);
+#else
     gpio_enable(pin_clk, GPIO_OUTPUT);
     gpio_enable(pin_dio, GPIO_OUTPUT);
-
 #endif
-    
+
     // Set CLK to low during DIO initialization to avoid sending a start signal by mistake
-    output_level(pin_clk, 0);
-    tm_delay();
-    output_level(pin_dio, 1);
-    tm_delay();
-    output_level(pin_clk, 1);
-    tm_delay();
+    tm_clk(led, 0);
+    tm_delay(led);
+    tm_dio(led, 1);
+    tm_delay(led);
+    tm_clk(led, 1);
+    tm_delay(led);
     return led;
+}
+
+void tm1637_delete(tm1637_led_t * led) {
+    free(led);
+}
+
+bool tm1637_is_online(const tm1637_led_t * led) {
+    return led && led->tm_online;
+}
+
+void tm1637_set_delay_us(tm1637_led_t * led, uint8_t us) {
+    if (led) {
+        led->tm_delay_us = us ? us : 1;
+    }
 }
 
 void tm1637_set_brightness(tm1637_led_t * led, uint8_t level) {
@@ -365,16 +414,9 @@ void tm1637_set_brightness(tm1637_led_t * led, uint8_t level) {
 }
 
 void tm1637_set_segment_raw(tm1637_led_t * led, const uint8_t segment_idx, const uint8_t data) {
-    tm_start(led);
-    tm_send_byte(led, TM1637_COMM3);
-    tm_stop(led);
-    tm_start(led);
-    tm_send_byte(led, tm1637_digitmap(led->tm_digits, segment_idx) | TM1637_COMM2);
-    tm_send_byte(led, data);
-    tm_stop(led);
-    tm_start(led);
-    tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
-    tm_stop(led);
+    if (segment_idx < led->tm_digits) {
+        tm_write(led, segment_idx, &data, 1);
+    }
 }
 
 static uint8_t tm1637_encode(uint8_t chr)
@@ -383,123 +425,112 @@ static uint8_t tm1637_encode(uint8_t chr)
   return tm_ascii[chr - 32];
 }
 
-void tm1637_print_string(tm1637_led_t * led, const char string_data[]) {
-    
-    tm_start(led);
-    tm_send_byte(led, TM1637_COMM1);
-    tm_stop(led);
-    
-    for (uint8_t i = 0; i < led->tm_digits; ++i) {
-        tm_start(led);
-        tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
-        tm_send_byte(led, tm1637_encode(string_data[i]));
-        tm_stop(led);
+void tm1637_print_symbols(tm1637_led_t * led, const uint8_t *seg, uint8_t count) {
+    uint8_t buf[TM1637_MAX_DIGITS] = {0};
+    for (uint8_t i = 0; i < count && i < led->tm_digits; ++i) {
+        buf[i] = seg[i];
     }
-    
-    tm_start(led);
-    tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
-    tm_stop(led);
+    tm_write(led, 0, buf, led->tm_digits);
+}
+
+void tm1637_print_string(tm1637_led_t * led, const char string_data[]) {
+    uint8_t buf[TM1637_MAX_DIGITS] = {0};
+    for (uint8_t i = 0; string_data && i < led->tm_digits && string_data[i]; ++i) {
+        buf[i] = tm1637_encode((uint8_t)string_data[i]);
+    }
+    tm_write(led, 0, buf, led->tm_digits);
 }
 
 void tm1637_print_4_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4) {
-
-    uint8_t seg_data[] = {d1, d2, d3, d4};
-    tm_start(led);
-    tm_send_byte(led, TM1637_COMM1);
-    tm_stop(led);
-
-    for (uint8_t i = 0; i < led->tm_digits; ++i) {
-        tm_start(led);
-        tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
-        tm_send_byte(led, seg_data[i]);
-        tm_stop(led);
-    }
-
-    tm_start(led);
-    tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
-    tm_stop(led);
+    const uint8_t seg_data[] = {d1, d2, d3, d4};
+    tm1637_print_symbols(led, seg_data, 4);
 }
 
 void tm1637_print_6_symbols(tm1637_led_t * led, uint8_t d1, uint8_t d2, uint8_t d3, uint8_t d4, uint8_t d5, uint8_t d6) {
+    const uint8_t seg_data[] = {d1, d2, d3, d4, d5, d6};
+    tm1637_print_symbols(led, seg_data, 6);
+}
 
-    uint8_t seg_data[] = {d1, d2, d3, d4, d5, d6};
-    tm_start(led);
-    tm_send_byte(led, TM1637_COMM1);
-    tm_stop(led);
-
-    for (uint8_t i = 0; i < led->tm_digits; ++i) {
-        tm_start(led);
-        tm_send_byte(led, tm1637_digitmap(led->tm_digits, i) | TM1637_COMM2);
-        tm_send_byte(led, seg_data[i]);
-        tm_stop(led);
+/* whole value right aligned in `n` digits starting at buf[0]; blank leading zeros */
+static void put_int(uint8_t *buf, uint8_t n, int v) {
+    for (int i = n - 1; i >= 0; --i) {
+        buf[i] = (v || i == n - 1) ? tm_num[v % 10] : 0x00;
+        v /= 10;
     }
-
-    tm_start(led);
-    tm_send_byte(led, led->tm_bright | TM1637_LBRTN);
-    tm_stop(led);
 }
 
 void tm1637_print_temp(tm1637_led_t * led, int t) {
-    //t = t*10;
-    bool msign = false;
-    uint8_t digit, s, d, e;
-    uint8_t seg_data = 0x00;
-    
-    if (t > 999) {
-        t = 999;
-    } else if (t < -999) {
-        t = -999;
-    }
-    
-    if (t < 0) {
-        t = t * (-1);
-        msign = true;
-        seg_data = TM1637_COMM1; //minus sign
-        tm1637_set_segment_raw(led, 0, seg_data);
-    }
-    
-    if (led->tm_digits == 6) {
-        //-XX.XºC
-        digit = 1;
-        tm1637_set_segment_raw(led, 5, 0x39);
-        if (msign == false) {
-            tm1637_set_segment_raw(led, 0, 0x00);
+    uint8_t buf[TM1637_MAX_DIGITS] = {0};
+    uint8_t n = led->tm_digits;
+    bool msign = t < 0;
+    int a = msign ? -t : t;                 /* tenths */
+
+    if (n >= 4) {
+        /* 6 digits: -XX.XºC; 4 digits: XX.Xº, -X.Xº, -XXº */
+        uint8_t digit = (n == 6) ? 1 : 0;
+        if (a > 999) {
+            a = 999;
         }
-    } else {
-        digit = 0;
-    }
-    
-    s = t / 100;
-    d = (t - s*100) / 10;
-    e = t - s*100 - d*10;
-    
-    if (msign && led->tm_digits == 4) {
-        if (s == 0) {
-            seg_data = tm_num[d];
-            seg_data |= TM1637_COMM4; //decimal point
-            tm1637_set_segment_raw(led, 1, seg_data);
-            seg_data = tm_num[e];
-            tm1637_set_segment_raw(led, 2, seg_data);
-        } else {
-            if (e > 4) {
-                d = d + 1;
+        uint8_t s = a / 100, d = (a / 10) % 10, e = a % 10;
+        if (n == 6) {
+            buf[0] = msign ? TM_MINUS : 0x00;
+            buf[5] = TM_C;
+        } else if (msign) {
+            buf[0] = TM_MINUS;
+            digit = 1;
+        }
+        if (msign && n == 4) {
+            if (s == 0) {                   /* -9.9º */
+                buf[1] = tm_num[d] | TM_DP;
+                buf[2] = tm_num[e];
+            } else {                        /* -12º */
+                int w = (a + 5) / 10;
+                if (w > 99) {
+                    w = 99;
+                }
+                buf[1] = tm_num[w / 10];
+                buf[2] = tm_num[w % 10];
             }
-            seg_data = tm_num[s];
-            tm1637_set_segment_raw(led, 1, seg_data);
-            seg_data = tm_num[d];
-            tm1637_set_segment_raw(led, 2, seg_data);
+            buf[3] = TM_DEG;
+        } else {
+            buf[digit] = s ? tm_num[s] : 0x00;
+            buf[digit + 1] = tm_num[d] | TM_DP;
+            buf[digit + 2] = tm_num[e];
+            buf[digit + 3] = TM_DEG;
+        }
+    } else if (n == 3) {
+        /* 23.2, " 5.3", 150, -9.9, -12 */
+        if (!msign && a < 1000) {
+            buf[0] = (a / 100) ? tm_num[a / 100] : 0x00;
+            buf[1] = tm_num[(a / 10) % 10] | TM_DP;
+            buf[2] = tm_num[a % 10];
+        } else if (!msign) {
+            int w = (a + 5) / 10;
+            put_int(buf, 3, w > 999 ? 999 : w);
+        } else if (a < 100) {
+            buf[0] = TM_MINUS;
+            buf[1] = tm_num[a / 10] | TM_DP;
+            buf[2] = tm_num[a % 10];
+        } else {
+            int w = (a + 5) / 10;
+            buf[0] = TM_MINUS;
+            put_int(&buf[1], 2, w > 99 ? 99 : w);
         }
     } else {
-        seg_data = tm_num[s];
-        tm1637_set_segment_raw(led, digit, seg_data);
-        seg_data = tm_num[d];
-        seg_data |= TM1637_COMM4; //decimal point
-        tm1637_set_segment_raw(led, digit+1, seg_data);
-        seg_data = tm_num[e];
-        tm1637_set_segment_raw(led, digit+2, seg_data);
+        /* 1 - 2 digits: whole degrees */
+        int w = (a + 5) / 10;
+        int max = (n == 2) ? (msign ? 9 : 99) : (msign ? 0 : 9);
+        if (w > max) {
+            w = max;
+        }
+        if (msign && n == 2) {
+            buf[0] = TM_MINUS;
+            buf[1] = tm_num[w];
+        } else {
+            put_int(buf, n, w);
+        }
     }
-    seg_data = TM_DEG;
-    tm1637_set_segment_raw(led, digit+3, seg_data);
+    tm_write(led, 0, buf, n);
 }
 
 void tm1637_print_float(tm1637_led_t * led, float f_value) {
@@ -554,7 +585,7 @@ void tm1637_print_float(tm1637_led_t * led, float f_value) {
         int_part = int_part + precision;
     }
 
-    uint8_t f_num[int_part - 1];
+    uint8_t f_num[int_part];               /* one element per printed digit */
     k = int_part - 1;
     
     for (i = 0; i < int_part; ++i) {
@@ -574,17 +605,10 @@ void tm1637_print_float(tm1637_led_t * led, float f_value) {
 }
 
 void tm1637_test_segments(tm1637_led_t * led) {
-    if (led->tm_digits == 6) {
-        tm1637_print_6_symbols(led, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
-    } else {
-        tm1637_print_4_symbols(led, 0xFF, 0xFF, 0xFF, 0xFF);
-    }
+    const uint8_t all[TM1637_MAX_DIGITS] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    tm1637_print_symbols(led, all, TM1637_MAX_DIGITS);
 }
 
 void tm1637_clear(tm1637_led_t * led) {
-    if (led->tm_digits == 6) {
-        tm1637_print_6_symbols(led, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
-    } else {
-        tm1637_print_4_symbols(led, 0x00, 0x00, 0x00, 0x00);
-    }
+    tm1637_print_symbols(led, NULL, 0);
 }
