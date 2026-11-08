@@ -31,7 +31,6 @@
 #if CONFIG_IDF_TARGET_ESP8266
 #include "rom/ets_sys.h"
 #define TM_DELAY_US(us) ets_delay_us(us)
-#define TM_OPEN_DRAIN   0               /* direction switching, as before */
 #else
 #include "esp_idf_version.h"
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
@@ -41,7 +40,6 @@
 #include "esp32/rom/ets_sys.h"
 #define TM_DELAY_US(us) ets_delay_us(us)
 #endif
-#define TM_OPEN_DRAIN   1               /* GPIO_MODE_INPUT_OUTPUT_OD */
 #endif
 
 #else
@@ -51,7 +49,6 @@
 #include "esp/gpio.h"
 #include "espressif/esp_misc.h"
 #define TM_DELAY_US(us) sdk_os_delay_us(us)
-#define TM_OPEN_DRAIN   0
 #endif
 
 #ifndef CONFIG_TM1637_BIT_DELAY_US
@@ -223,7 +220,6 @@ static uint8_t pin_read(uint8_t gpio) {
 #endif
 }
 
-#if !TM_OPEN_DRAIN
 static void pin_dir(uint8_t gpio, bool output) {
 #ifdef ESP_PLATFORM
     gpio_set_direction((gpio_num_t)gpio, output ? GPIO_MODE_OUTPUT : GPIO_MODE_INPUT);
@@ -231,10 +227,11 @@ static void pin_dir(uint8_t gpio, bool output) {
     gpio_enable(gpio, output ? GPIO_OUTPUT : GPIO_INPUT);
 #endif
 }
-#endif
 
-/* Open-drain: level 1 releases the line and the pull-up resistor makes it high,
- * so the TM1637 can pull DIO low (ACK) without fighting the MCU output. */
+/* CLK and DIO are driven push-pull (fast edges, whatever the capacitors on the module).
+ * Only the MCU drives CLK. DIO is switched to input for the ACK *before* the falling edge
+ * of the 8th clock, when the TM1637 starts pulling it low, and driven again after the 9th
+ * clock, so the two chips never drive DIO against each other. */
 static void tm_clk(const tm1637_led_t * led, uint8_t lvl) { pin_level(led->tm_clk, lvl); }
 static void tm_dio(const tm1637_led_t * led, uint8_t lvl) { pin_level(led->tm_dio, lvl); }
 
@@ -264,6 +261,7 @@ static void tm_stop(const tm1637_led_t * led) {
 
 /* Returns false when the TM1637 does not acknowledge the byte (missing/broken display). */
 static bool tm_send_byte(const tm1637_led_t * led, uint8_t byte) {
+    const bool last_bit = byte & 0x80;      /* the 8th (last) bit, LSB first */
     for (uint8_t i = 0; i < 8; ++i) {
         tm_clk(led, 0);
         tm_delay(led);
@@ -276,15 +274,20 @@ static bool tm_send_byte(const tm1637_led_t * led, uint8_t byte) {
 
     /*
      The TM1637 signals an ACK by pulling DIO low from the falling edge of CLK after sending
-     the 8th bit, to the next falling edge of CLK. DIO is released (open-drain) or set as input
-     during this time to avoid having both chips trying to drive DIO at the same time.
+     the 8th bit, to the next falling edge of CLK. The MCU must stop driving DIO by then, but
+     DIO must not rise while CLK is high (that would be a STOP condition):
+     - last bit 1: DIO is high; it is released while CLK is still high (the pull-up keeps it
+       high), so the MCU never drives high against the TM1637 pulling low;
+     - last bit 0: DIO is low and the TM1637 also pulls low, so it is released only after CLK
+       falls. Either way both chips never drive DIO to different levels.
      */
-    tm_clk(led, 0); // TM1637 starts ACK (pulls DIO low)
-#if TM_OPEN_DRAIN
-    tm_dio(led, 1);
-#else
-    pin_dir(led->tm_dio, false);
-#endif
+    if (last_bit) {
+        pin_dir(led->tm_dio, false);
+        tm_clk(led, 0); // TM1637 starts ACK (pulls DIO low)
+    } else {
+        tm_clk(led, 0); // TM1637 starts ACK (pulls DIO low)
+        pin_dir(led->tm_dio, false);
+    }
     tm_delay(led);
 
     bool ack = false;
@@ -300,9 +303,8 @@ static bool tm_send_byte(const tm1637_led_t * led, uint8_t byte) {
     tm_delay(led);
     tm_clk(led, 0); // TM1637 ends ACK (releasing DIO)
     tm_delay(led);
-#if !TM_OPEN_DRAIN
+    tm_dio(led, 0);  // level first, then drive again (next: data bit or stop, both start low)
     pin_dir(led->tm_dio, true);
-#endif
     return ack;
 }
 
@@ -345,6 +347,26 @@ static void tm_write(tm1637_led_t * led, uint8_t first, const uint8_t *data, uin
     }
 }
 
+/* Clears all 6 display addresses (GRID1..GRID6), whatever the number of digits in use. */
+static void tm_clear_all(tm1637_led_t * led) {
+    bool ok;
+    tm_start(led);
+    ok = tm_send_byte(led, TM1637_COMM1);   /* auto increment */
+    tm_stop(led);
+    if (ok) {
+        tm_start(led);
+        ok = tm_send_byte(led, TM1637_COMM2);   /* address 0 */
+        for (uint8_t i = 0; ok && i < TM1637_MAX_DIGITS; ++i) {
+            ok = tm_send_byte(led, 0x00);
+        }
+        tm_stop(led);
+    }
+    led->tm_online = ok;
+    if (!ok) {
+        led->tm_retry_tick = tm_now_tick() + pdMS_TO_TICKS(CONFIG_TM1637_RETRY_MS);
+    }
+}
+
 /* ------------------------------------------------------------- API */
 
 tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
@@ -368,12 +390,8 @@ tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
 #ifdef ESP_PLATFORM
     gpio_config_t io_conf = {0};            /* interrupts disabled */
     io_conf.pin_bit_mask = (1ULL << pin_clk) | (1ULL << pin_dio);
-#if TM_OPEN_DRAIN
-    io_conf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
-#else
-    io_conf.mode = GPIO_MODE_OUTPUT;
-#endif
-    /* the internal pull-up only helps the external resistors (weak, ~45 kOhm) */
+    io_conf.mode = GPIO_MODE_OUTPUT;        /* push-pull; DIO turns to input for each ACK */
+    /* keeps DIO defined while it is an input; helps the external resistors (weak, ~45 kOhm) */
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpio_config(&io_conf);
@@ -389,6 +407,10 @@ tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
     tm_delay(led);
     tm_clk(led, 1);
     tm_delay(led);
+
+    /* The display RAM is not cleared at power-on: positions that are not used (e.g. the 4th
+     * digit of a 4-digit module driven as 3 digits) would keep showing random segments. */
+    tm_clear_all(led);
     return led;
 }
 

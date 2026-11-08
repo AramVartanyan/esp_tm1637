@@ -23,7 +23,8 @@
  *
  * Wiring: SEG1..SEG8 = A..G, DP; GRID1 = leftmost digit (address 0).
  * CLK and DIO need pull-up resistors to the MCU logic level (e.g. 10 kOhm to 3.3 V);
- * the TM1637 itself may run from 5 V. On ESP-IDF the lines are driven open-drain.
+ * the TM1637 itself may run from 5 V. CLK and DIO are driven push-pull; DIO turns to input
+ * only for the ACK of each byte (never driven against the TM1637).
  *
  * Thread safety: a display object must be used from one task only.
  */
@@ -37,7 +38,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define ESP_TM1637_VERSION "1.1.0"
+#define ESP_TM1637_VERSION "1.1.1"
 
 #define TM1637_MAX_DIGITS 6
 

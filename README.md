@@ -2,7 +2,7 @@
 
 ESP-IDF library for 7-segment LED displays with the TM1637 chip
 
-**Version 1.1.0** (in development, not tested on hardware yet) — see [Changelog.md](Changelog.md).
+**Version 1.1.1** (1.1.0 tested on hardware; 1.1.1 not tested yet) — see [Changelog.md](Changelog.md).
 
 ## Description
 
@@ -17,8 +17,10 @@ esp-open-rtos as well.
   6-digit modules use the usual 2-1-0-5-4-3 wiring, handled by the library.
 - The display must be **common anode**.
 - CLK and DIO need **pull-up resistors to the MCU logic level** (e.g. 10 kΩ to 3.3 V). The TM1637
-  itself may run from 5 V; it only pulls DIO low, so the MCU pins never see 5 V. On ESP-IDF the
-  lines are driven **open-drain** (the internal pull-ups are enabled as a weak addition).
+  itself may run from 5 V; it only pulls DIO low, so the MCU pins never see 5 V.
+- CLK and DIO are driven **push-pull** (fast edges whatever the capacitors on the module); DIO turns
+  to input only for the ACK of each byte, at a moment when the two chips cannot drive it to
+  different levels. The internal pull-ups are enabled as a weak addition.
 - Pull-ups to 5 V must not be used with ESP32 chips (pins are not 5 V tolerant). Ready-made
   modules often have their pull-ups to the module VCC — move them to 3.3 V when VCC is 5 V.
 
