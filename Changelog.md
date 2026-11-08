@@ -4,6 +4,17 @@ All notable changes to this library are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — in development (not tested on hardware)
+
+### Fixed
+- CLK and DIO back to push-pull. With open-drain the rising edges depend on the pull-up and the
+  capacitors of the module: a common module at 3.3 V (10 kΩ on board ∥ internal pull-up) needed a
+  half bit time of 40 µs instead of 3 µs. Now the edges are fast again, as in 1.0.0.
+- No drive conflict on DIO at the ACK: after a last bit 1 the line is released while CLK is still
+  high (it stays high), after a last bit 0 only after CLK falls (both chips pull low) — the line
+  never rises while CLK is high, which would be a STOP condition. ESP8266 / esp-open-rtos use the
+  same sequence (before, DIO stayed driven for a few µs into the ACK).
+
 ## [1.1.0] — in development (not tested on hardware)
 
 ### Added
