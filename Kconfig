@@ -1,0 +1,25 @@
+menu "TM1637 display"
+
+    config TM1637_BIT_DELAY_US
+        int "Half bit time (us)"
+        range 1 100
+        default 3
+        help
+            Default delay between line changes. Increase it (e.g. 10 - 20 us) for weak
+            pull-ups or long wires; tm1637_set_delay_us() changes it at run time.
+
+    config TM1637_ACK_TIMEOUT_US
+        int "ACK timeout (us)"
+        range 10 10000
+        default 100
+        help
+            How long to wait for the TM1637 to acknowledge a byte. Without an ACK the
+            display is marked offline and the write is abandoned, so a missing or broken
+            display never blocks the application.
+
+    config TM1637_RETRY_MS
+        int "Retry interval of an offline display (ms)"
+        range 100 60000
+        default 5000
+
+endmenu

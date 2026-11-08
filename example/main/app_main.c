@@ -27,30 +27,30 @@ void tm1637_task(void * arg)
 	{
         //Initial test
         tm1637_test_segments(display);
-        vTaskDelay(2000 / portTICK_RATE_MS);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
         tm1637_clear(display);
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         
         //Test stmbols
         tm1637_print_string(display, "Lets");
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         tm1637_print_string(display, " go ");
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         tm1637_print_string(display, "Auto");
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         
         
         //Test stmbols
         tm1637_print_4_symbols(display, 0x7A, 0x79, 0x79, 0x73);
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         tm1637_print_4_symbols(display, 0x39, 0x77, 0x38, 0x55);
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         
         if (n_digits == 6) {
             tm1637_print_6_symbols(display, 0x00, 0x3D, 0x79, 0x78, 0x00, 0x00);
-            vTaskDelay(1000 / portTICK_RATE_MS);
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
             tm1637_print_6_symbols(display, 0x08, 0x58, 0x5C, 0x5C, 0x18, 0x08);
-            vTaskDelay(2000 / portTICK_RATE_MS);
+            vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
 
         // Test print float
@@ -64,7 +64,7 @@ void tm1637_task(void * arg)
                 test_number = test_number - 5.678;
             }
             tm1637_print_float(display, test_number);
-            vTaskDelay(100 / portTICK_RATE_MS);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
 
          // Test print temperature
@@ -72,7 +72,7 @@ void tm1637_task(void * arg)
          while (temp < 200) {
              temp = temp + 1;
              tm1637_print_temp(display, temp);
-             vTaskDelay(50 / portTICK_RATE_MS);
+             vTaskDelay(50 / portTICK_PERIOD_MS);
          }
         
         if (n_digits == 6) {
@@ -94,7 +94,7 @@ void tm1637_task(void * arg)
             for (int x=0; x<7; x++) {
                 tm1637_set_brightness(display, x);
                 tm1637_print_float(display, 888888);
-                vTaskDelay(300 / portTICK_RATE_MS);
+                vTaskDelay(300 / portTICK_PERIOD_MS);
             }
         } else {
             // Test segment control
@@ -113,12 +113,12 @@ void tm1637_task(void * arg)
             for (int x=0; x<7; x++) {
                 tm1637_set_brightness(display, x);
                 tm1637_print_float(display, 8888);
-                vTaskDelay(300 / portTICK_RATE_MS);
+                vTaskDelay(300 / portTICK_PERIOD_MS);
             }
         }
 
         tm1637_clear(display);
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
 }
 
