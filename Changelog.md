@@ -14,6 +14,8 @@ versions follow [Semantic Versioning](https://semver.org/).
   high (it stays high), after a last bit 0 only after CLK falls (both chips pull low) — the line
   never rises while CLK is high, which would be a STOP condition. ESP8266 / esp-open-rtos use the
   same sequence (before, DIO stayed driven for a few µs into the ACK).
+- `tm1637_init()` clears all 6 display addresses: the TM1637 RAM is not cleared at power-on, so an
+  unused position (e.g. the 4th digit of a 4-digit module driven as 3 digits) showed random segments.
 
 ## [1.1.0] — in development (not tested on hardware)
 

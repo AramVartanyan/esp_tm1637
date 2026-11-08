@@ -347,6 +347,26 @@ static void tm_write(tm1637_led_t * led, uint8_t first, const uint8_t *data, uin
     }
 }
 
+/* Clears all 6 display addresses (GRID1..GRID6), whatever the number of digits in use. */
+static void tm_clear_all(tm1637_led_t * led) {
+    bool ok;
+    tm_start(led);
+    ok = tm_send_byte(led, TM1637_COMM1);   /* auto increment */
+    tm_stop(led);
+    if (ok) {
+        tm_start(led);
+        ok = tm_send_byte(led, TM1637_COMM2);   /* address 0 */
+        for (uint8_t i = 0; ok && i < TM1637_MAX_DIGITS; ++i) {
+            ok = tm_send_byte(led, 0x00);
+        }
+        tm_stop(led);
+    }
+    led->tm_online = ok;
+    if (!ok) {
+        led->tm_retry_tick = tm_now_tick() + pdMS_TO_TICKS(CONFIG_TM1637_RETRY_MS);
+    }
+}
+
 /* ------------------------------------------------------------- API */
 
 tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
@@ -387,6 +407,10 @@ tm1637_led_t * tm1637_init(uint8_t pin_clk, uint8_t pin_dio, uint8_t n_digits) {
     tm_delay(led);
     tm_clk(led, 1);
     tm_delay(led);
+
+    /* The display RAM is not cleared at power-on: positions that are not used (e.g. the 4th
+     * digit of a 4-digit module driven as 3 digits) would keep showing random segments. */
+    tm_clear_all(led);
     return led;
 }
 
