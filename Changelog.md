@@ -4,7 +4,11 @@ All notable changes to this library are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.1.1] — in development (not tested on hardware)
+## [1.1.1] — tested on hardware
+
+Tested on ESP32-S3 (ESP-IDF 5.5.4), 4-digit module driven as 3 digits, TM1637 at 3.3 V: answers with
+the default 3 µs half bit time (1.1.0 with open-drain needed 40 µs on the same module), segment test,
+unused 4th digit dark. A missing display does not block the application.
 
 ### Fixed
 - CLK and DIO back to push-pull. With open-drain the rising edges depend on the pull-up and the
@@ -17,7 +21,7 @@ versions follow [Semantic Versioning](https://semver.org/).
 - `tm1637_init()` clears all 6 display addresses: the TM1637 RAM is not cleared at power-on, so an
   unused position (e.g. the 4th digit of a 4-digit module driven as 3 digits) showed random segments.
 
-## [1.1.0] — in development (not tested on hardware)
+## [1.1.0] — tested on hardware (open-drain timing issue, fixed in 1.1.1)
 
 ### Added
 - Support for 1 to 6 digits (3-digit displays included); `TM1637_MAX_DIGITS`.

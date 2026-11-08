@@ -2,7 +2,7 @@
 
 ESP-IDF library for 7-segment LED displays with the TM1637 chip
 
-**Version 1.1.1** (1.1.0 tested on hardware; 1.1.1 not tested yet) — see [Changelog.md](Changelog.md).
+**Version 1.1.1** — tested on hardware (ESP32-S3, ESP-IDF 5.5.4, 3-digit display, TM1637 at 3.3 V) — see [Changelog.md](Changelog.md).
 
 ## Description
 
